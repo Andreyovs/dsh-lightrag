@@ -1,0 +1,46 @@
+{
+  "name": "dsh-lightrag",
+  "version": "0.1.0",
+  "description": "LightRAG knowledge base for DeepSeek Harness: ingest documents into a LightRAG server and query the knowledge graph with agent tools (lightrag_query, lightrag_ingest_text, lightrag_ingest_file, lightrag_track, lightrag_status, lightrag_documents, lightrag_delete_document).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/web-ui.js",
+    "cordis.patch.yml",
+    "ui/dist"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "lightrag",
+    "graph-rag",
+    "knowledge-base"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.7"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    },
+    "engines": {
+      "dsh": ">=0.1.1-rc.1"
+    }
+  }
+}

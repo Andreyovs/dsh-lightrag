@@ -1,0 +1,19 @@
+# dsh-lightrag — LightRAG knowledge base for the agent.
+#
+# Inserts a `lightrag` entry into the profile tree; the plugin registers the
+# lightrag_* agent tools (query / ingest text / ingest file / track progress /
+# status / list documents / delete) and a system-prompt section about the KB.
+#
+# Config — environment variables take precedence over the values below:
+#   LIGHTRAG_BASE_URL  LightRAG server address (default http://127.0.0.1:9621)
+#   LIGHTRAG_API_KEY   API key, sent as `Authorization: Bearer <key>`
+#   queryMode          default retrieval mode: mix | local | global | hybrid | naive | bypass
+#   timeoutMs          per-request timeout for all LightRAG calls
+- insert:
+    - id: lightrag
+      name: dsh-lightrag
+      config:
+        baseUrl: !!js process.env.LIGHTRAG_BASE_URL ?? 'http://127.0.0.1:9621'
+        apiKey: !!js process.env.LIGHTRAG_API_KEY ?? ''
+        queryMode: mix
+        timeoutMs: 180000
