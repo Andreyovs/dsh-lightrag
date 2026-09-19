@@ -20,25 +20,24 @@
 Плагин также добавляет в системный промпт агента секцию о базе знаний —
 агент сам знает, когда использовать `lightrag_query` вместо `web_search`.
 
-## Веб-интерфейс (внутри GUI DSH)
+## Веб-страница (внутри GUI DSH)
 
-Страница управления документами: **http://127.0.0.1:3080/lightrag-docs**
+Плагин регистрирует SSR-страницу **http://127.0.0.1:3080/lightrag-docs**
+в веб-сервере GUI (маршруты `exact /lightrag-docs` + `prefix /lightrag-docs/action`).
 
-- Загрузка: файлы (drag&drop, мультизагрузка) и текст.
-- Список документов: поиск по имени, фильтр по статусу, автообновление во время индексации.
-- Карточка документа (модалка), повторная обработка FAILED, удаление (с подтверждением).
-- Живой прогресс недавних загрузок (опрос track_id).
+- Таблица документов: имя (с превью-контентом в tooltip), статус, размер, дата, ID.
+- Фильтры-чипы по статусам, поиск по имени, пагинация (50/стр).
+- 📤 **Загрузить документ** — файл до 20 МБ; расширение проверяется по живому
+  списку сервера (`GET /documents/supported_file_types`); файл шлётся base64-формой,
+  хост записывает временный файл и грузит его на сервер `POST /documents/upload`.
+- 🗑 **Удалить все документы** — подтверждение вводом слова «УДАЛИТЬ»;
+  `DELETE /documents` (кэш `__parsed__` сохраняется).
+- ✕ Удаление одного документа (с подтверждением).
+- Бейндж занятого пайплайна, баннеры (загружено/удалено/ошибка),
+  автообновление каждые 15 с.
 
-Технически: React SPA (сборка Vite в `ui/dist`) + API-прокси
-`/api/lightrag-docs/*` — оба маршрута регистрируются плагином в веб-сервере
-GUI (только loopback). Переговоры с LightRAG-сервером идут на стороне плагина,
-CORS не нужен.
-
-Сборка UI (требуется только при изменении исходников в `ui/`):
-
-```bash
-cd ui && npm install && npm run build   # результат: ui/dist
-```
+Все обращения к LightRAG-серверу идут со стороны хоста (curl из процесса dsh) —
+CORS не нужен. Страница переживает перезапуск dsh web (часть плагина профиля).
 
 ## Требования
 
@@ -77,32 +76,30 @@ export LIGHTRAG_API_KEY="..."   # если сервер запущен с --api-
 Для сервера в локальной сети, например:
 
 ```bash
-export LIGHTRAG_BASE_URL="http://<адрес-сервера>:9621"
+export LIGHTRAG_BASE_URL="http://192.168.1.50:9621"
 ```
 
-### Локальная установка сервера
+### Локальная установка сервера (выполнена)
 
-Сервер разворачивается в WSL из GitHub (HKUDS/LightRAG, ветка main, `[api]`):
+Сервер развёрнут в WSL из GitHub (HKUDS/LightRAG, ветка main, `[api]`),
+каталог `/home/sa/andrey/work/lightrag`:
 
 ```bash
-# каталог: ~/work/lightrag
 uv venv --python 3.14 .venv
 uv pip install --python .venv/bin/python "git+https://github.com/HKUDS/LightRAG.git[api]"
-lightrag-server   # конфиг в ~/work/lightrag/.env
+lightrag-server   # конфиг в /home/sa/andrey/work/lightrag/.env
 ```
 
-Пример конфигурации (`.env`): любой OpenAI-совместимый бэкенд (GPUStack,
-vLLM и т.п.) — `LLM_BINDING=openai`, `LLM_BINDING_HOST=https://<gpu-host>/v1`,
-`EMBEDDING_BINDING=openai`, `EMBEDDING_MODEL=<embedding-модель>`,
-`EMBEDDING_DIM=<размерность>`, `SUMMARY_LANGUAGE=Russian`; хранилища —
-JSON/NanoVectorDB/NetworkX в `WORKING_DIR`.
+Текущая конфигурация (`.env`): LLM `RedHatAI/Qwen3.6-35B-A3B-NVFP4` через
+gpustack `http://192.168.60.200:8001/v1` (openai-binding), эмбеддинги
+`bge-m3:latest` (1024 мер) через Ollama `http://192.168.60.200:11434/v1`,
+`LLM_TIMEOUT=600`, `EMBEDDING_TIMEOUT=300`, `MAX_PARALLEL_INSERT=1`,
+`SUMMARY_LANGUAGE=Russian`, хранилища — JSON/NanoVectorDB/NetworkX в
+`/home/sa/andrey/work/lightrag/rag_storage`.
 
-Проверено: индексация русского документа (9 сущностей / 9 связей),
-запрос возвращает ответ с фактами и ссылкой на источник.
-
-> Замечание: извлечение сущностей идёт через LLM — для первого документа
-> ~10 минут (зависит от загрузки gpustack). Для больших корпоративных
-> документов заложите время или уменьшите параллелизм/размер чанков.
+> Замечание: извлечение сущностей идёт через LLM — время зависит от загрузки
+> машины с моделями (Ollama-машина общая: возможны swap-задержки).
+> Для больших документов заложите время или уменьшите параллелизм/чанки.
 
 ## Типовой сценарий
 
@@ -123,20 +120,34 @@ node test/mock-test.mjs
 и прогоняет клиента и все 7 инструментов, включая авторизацию, опрос
 прогресса и обработку ошибок.
 
-## Используемый REST API сервера (совместимость)
+## Используемый REST API сервера (совместимость, v1.5.x)
 
 ```
 GET    /health
 POST   /query                       {query, mode, only_need_context?, response_type?, top_k?, user_prompt?, include_references?}
 POST   /documents/text              {text, file_source?}                → {status, message, track_id}
 POST   /documents/upload            multipart `file`                    → {status, message, track_id}
-POST   /documents/paginated         {page, page_size, status_filter?, sort_field, sort_direction}
+POST   /documents/paginated         {page, page_size(10..200), status_filter?, sort_field, sort_direction}
+GET    /documents/status_counts     → {status_counts: {pending, parsing, …, all}}
+GET    /documents/supported_file_types
 GET    /documents/pipeline_status
 GET    /documents/track_status/{id}
-DELETE /documents/delete_document   {doc_id, delete_file?}
+DELETE /documents/delete_document   {doc_ids: [doc-…], delete_file?}
+DELETE /documents                   ?delete_parsed_files (по умолчанию false)
 ```
 
-Статусы документов: `PENDING | PREPROCESSED | PARSING | ANALYZING | PROCESSED | FAILED`.
+Статусы документов (в API — **строчные**):
+`pending | preprocessed | parsing | analyzing | processing | processed | failed`.
+
+Нюансы v1.5.x:
+- `DELETE /documents/delete_document` требует поле `doc_ids` (массив);
+  `doc_id` → 422.
+- `POST /documents/text` под конкурентной индексацией может терять запись
+  `doc_status` (контент при этом попадает в граф) — плагин поэтому ведёт текст
+  через временный файл и `/documents/upload`.
+- Удаление может «зависнуть» после KG-rebuild; перезапуск сервера LightRAG
+  разблокирует очередь.
+- Имена файлов с `/` сервер отклоняет («Unsafe filename») — плагин санитизирует.
 
 ## Структура
 
@@ -144,7 +155,7 @@ DELETE /documents/delete_document   {doc_id, delete_file?}
 dsh-lightrag/
 ├── package.json        # метаданные, dsh.bundle.patch → cordis.patch.yml
 ├── cordis.patch.yml    # слой патча: запись `lightrag` в дерево профиля
-├── lib/index.js        # клиент LightRAG REST + 7 инструментов + apply(ctx, config)
+├── lib/index.js        # клиент LightRAG REST + 7 инструментов + SSR-страница /lightrag-docs + apply(ctx, config)
 ├── test/mock-test.mjs  # тесты с мок-сервером
 └── node_modules/       # dev-ссылки на dsh-tools/schemastery (не публикуются)
 ```

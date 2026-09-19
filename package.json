@@ -10,9 +10,7 @@
   },
   "files": [
     "lib/index.js",
-    "lib/web-ui.js",
-    "cordis.patch.yml",
-    "ui/dist"
+    "cordis.patch.yml"
   ],
   "keywords": [
     "deepseek-harness",
