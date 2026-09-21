@@ -48,7 +48,7 @@ CORS не нужен. Страница переживает перезапуск
 
 ```bash
 # в профиле web:
-dsh plugin --profile web add /home/sa/work/dsh-lightrag
+dsh plugin --profile web add /home/sa/automation/dsh-lightrag
 ```
 
 После установки профиль перезагрузится (у web-профиля `patchReload: live`) —
@@ -112,7 +112,7 @@ gpustack `http://192.168.60.200:8001/v1` (openai-binding), эмбеддинги
 ## Тесты
 
 ```bash
-cd /home/sa/work/dsh-lightrag
+cd /home/sa/automation/dsh-lightrag
 node test/mock-test.mjs
 ```
 
