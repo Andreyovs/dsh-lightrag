@@ -113,8 +113,9 @@ const ok = (label) => {
   assert.ok(out.content.includes("mock answer"));
   assert.strictEqual(out.mode, "hybrid"); // default from cfg
   assert.strictEqual(out.references[0].file, "manual.md");
-  // dsh-tools >=0.1.2: finalizeContent receives a ToolExecutionResult envelope {isError, value}, not the raw value
-  assert.deepStrictEqual(t.finalizeContent(null, { isError: false, value: out }), [{ type: "text", text: t.output.render({ query: "x" }, out) }]);
+  // dsh-tools >=0.1.2: finalizeContent receives a ToolExecutionResult envelope {isError, value}, not the raw value.
+  // dsh 0.2.0 contract: output.render returns ContentBlock[] directly; finalizeContent is idempotent with it.
+  assert.deepStrictEqual(t.finalizeContent(null, { isError: false, value: out }), t.output.render({ query: "x" }, out));
   ok("lightrag_query (default mode from config, references, finalize)");
 
   const out2 = await t.execute({ query: "q", mode: "naive", onlyNeedContext: true, topK: 25, responseType: "Bullet Points", userPrompt: "be brief" });
