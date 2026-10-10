@@ -140,7 +140,10 @@ const ok = (label) => {
   const out2 = await t.execute({ text: "[Unit]\nDescription=x", fileSource: "autostart/service.service" });
   assert.strictEqual(out2.trackId, "upload_track_1");
   assert.strictEqual(uploadFilenames.at(-1), "autostart-service.service.txt"); // unsupported ext → .txt
-  ok("lightrag_ingest_text (upload route + filename sanitizing)");
+  const out3 = await t.execute({ text: "отчёт", fileSource: "Отчёт за март.xlsx" });
+  assert.strictEqual(out3.trackId, "upload_track_1");
+  assert.strictEqual(uploadFilenames.at(-1), "Отчёт за март.xlsx"); // unicode + spaces preserved
+  ok("lightrag_ingest_text (upload route + filename sanitizing, unicode preserved)");
 }
 
 // --- lightrag_ingest_file ---

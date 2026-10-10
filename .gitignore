@@ -1,2 +1,13 @@
 node_modules/
 *.log
+
+# Локальное состояние LightRAG — никогда в репозиторий
+.env
+.env.*
+rag_storage/
+inputs/
+logs/
+__parsed__/
+backup-*.tar.gz
+*.tar.gz
+*.tar

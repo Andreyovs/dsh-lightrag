@@ -33,7 +33,12 @@
 - 🗑 **Удалить все документы** — подтверждение вводом слова «УДАЛИТЬ»;
   `DELETE /documents` (кэш `__parsed__` сохраняется).
 - ✕ Удаление одного документа (с подтверждением).
-- Бейндж занятого пайплайна, баннеры (загружено/удалено/ошибка),
+- ↻ **Переработать ошибочные** — появляется, когда есть документы в статусе
+  `failed` (или при фильтре по статусу «ошибка»); `POST /documents/reprocess_failed`
+  возвращает упавшие записи в пайплайн (LLM-извлечение повторится, кэш уже
+  выполненных шагов экономит время).
+- Строки `failed` показывают причину падения (`error_msg`) в tooltip имени файла.
+- Бейндж занятого пайплайна, баннеры (загружено/удалено/переработано/ошибка),
   автообновление каждые 15 с.
 
 Все обращения к LightRAG-серверу идут со стороны хоста (curl из процесса dsh) —
@@ -82,7 +87,9 @@ export LIGHTRAG_BASE_URL="http://192.168.1.50:9621"
 ### Локальная установка сервера (выполнена)
 
 Сервер развёрнут в WSL из GitHub (HKUDS/LightRAG, ветка main, `[api]`),
-каталог `/home/sa/andrey/work/lightrag`:
+актуальный каталог — `/home/sa/automation/lightrag` (автозапуск
+`autostart/start-services.sh` из `/etc/wsl.conf [boot]`; раннее рабочее место
+`/home/sa/andrey/work/lightrag` сохранено как запасной инстанс):
 
 ```bash
 uv venv --python 3.14 .venv
@@ -90,16 +97,45 @@ uv pip install --python .venv/bin/python "git+https://github.com/HKUDS/LightRAG.
 lightrag-server   # конфиг в /home/sa/andrey/work/lightrag/.env
 ```
 
-Текущая конфигурация (`.env`): LLM `RedHatAI/Qwen3.6-35B-A3B-NVFP4` через
-gpustack `http://192.168.60.200:8001/v1` (openai-binding), эмбеддинги
-`bge-m3:latest` (1024 мер) через Ollama `http://192.168.60.200:11434/v1`,
-`LLM_TIMEOUT=600`, `EMBEDDING_TIMEOUT=300`, `MAX_PARALLEL_INSERT=1`,
-`SUMMARY_LANGUAGE=Russian`, хранилища — JSON/NanoVectorDB/NetworkX в
-`/home/sa/andrey/work/lightrag/rag_storage`.
+Текущая конфигурация (`.env`): LLM `qwen3.5-122b-a10b-fp8-dynamic` через
+**failover-прокси** `http://127.0.0.1:8901/v1` (primary — gpustack
+`https://gpustack.rtk-cd.ru/v1`, резерв — vLLM
+`http://192.168.60.200:8001/v1`), эмбеддинги `BAAI/bge-m3` (1024 мер) через
+vLLM `http://192.168.60.200:8003/v1`, `LLM_TIMEOUT=600`,
+`EMBEDDING_TIMEOUT=300`, `MAX_PARALLEL_INSERT=1`, `SUMMARY_LANGUAGE=Russian`,
+хранилища — JSON/NanoVectorDB/NetworkX в `rag_storage/`.
 
 > Замечание: извлечение сущностей идёт через LLM — время зависит от загрузки
-> машины с моделями (Ollama-машина общая: возможны swap-задержки).
+> машины с моделями (gpustack-сервер общий: возможны задержки).
 > Для больших документов заложите время или уменьшите параллелизм/чанки.
+
+### LLM failover-прокси (`failover/`)
+
+`failover/llm_failover_proxy.py` — OpenAI-совместимый прокси на
+`127.0.0.1:8901`, который LightRAG использует как `LLM_BINDING_HOST`.
+Защищает индексацию от падений GPU-бэкендов:
+
+1. **primary** — `https://gpustack.rtk-cd.ru/v1` (заголовок `Authorization`
+   клиента пересылается как есть);
+2. **backup** — `http://192.168.60.200:8001/v1` (vLLM) — включается при
+   connect-error, таймауте или 408/429/5xx **до первого байта ответа**;
+   имя модели переписывается в `RedHatAI/Qwen3.6-35B-A3B-NVFP4`.
+
+После сбоя primary трафик идёт сразу в резерв (cooldown 60 с), фоновый
+сондаж `GET /models` каждые 20 с возвращает его на primary. Дедлайны:
+primary 300 с, резерв 280 с (сумма < `LLM_TIMEOUT`). `GET /health` —
+состояние и счётчики маршрутизации; `GET /v1/models` — сводный список
+модели обоих бэкендов.
+
+> Эмбеддинги failover не имеют: `BAAI/bge-m3` обслуживает только Spark `:8003`,
+> подменить модель нельзя (векторы 1024d несовместимы — база перестаёт
+> отвечать по запросам к старым документам).
+
+```bash
+bash failover/failover-start.sh   # идемпотентный запуск (лог: logs/failover-proxy.log)
+```
+
+В автозапуске прокси стартует первым шагом `autostart/start-services.sh`.
 
 ## Типовой сценарий
 
@@ -134,6 +170,7 @@ GET    /documents/pipeline_status
 GET    /documents/track_status/{id}
 DELETE /documents/delete_document   {doc_ids: [doc-…], delete_file?}
 DELETE /documents                   ?delete_parsed_files (по умолчанию false)
+POST   /documents/reprocess_failed  {}                                → {reprocessed_count, …}
 ```
 
 Статусы документов (в API — **строчные**):
@@ -149,13 +186,46 @@ DELETE /documents                   ?delete_parsed_files (по умолчани�
   разблокирует очередь.
 - Имена файлов с `/` сервер отклоняет («Unsafe filename») — плагин санитизирует.
 
+## Безопасность (анти-утечка секретов)
+
+`scripts/secret-scan.mjs` — «агент по безопасности» репозитория. Сканит
+рабочее дерево **и полную git-историю** (все ветки) и блокирует:
+
+- **запрещённые пути**: `.env*`, `*.pem/*.key/*.p12`, `id_rsa*`,
+  `rag_storage/`, `inputs/`, `logs/`, `__parsed__/`, архивы/бэкапы;
+- **известные форматы секретов**: GitHub PAT (`ghp_…`, `github_pat_…`),
+  OpenAI/Anthropic (`sk-…`, `sk-ant-…`), AWS (`AKIA…`), Slack, Telegram-bot,
+  JWT, блоки `-----BEGIN … PRIVATE KEY`;
+- **общие паттерны**: `api_key/secret/token/password = <значение ≥16 символов>`,
+  кроме явных плейсхолдеров (`not-needed`, `ollama`, `changeme`, `<…>`, `$VAR`).
+
+```bash
+node scripts/secret-scan.mjs         # проверка всего (дерево + история)
+node scripts/secret-scan.mjs --tree  # только рабочее дерево (быстро)
+```
+
+`pre-push`-хук (`scripts/hooks/pre-push`) запускает скан перед каждым пушем
+и **прерывает пуш**, если найдены нарушения. Включение для локального клона:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+Правила игнорирования — в `.gitignore` (`.env*`, `rag_storage/`, `inputs/`,
+`logs/`, архивы/бэкапы). API-ключи живут только в `.env` развернутого
+сервера и в переменных окружения процесса dsh — никогда в git.
+
 ## Структура
 
 ```
 dsh-lightrag/
-├── package.json        # метаданные, dsh.bundle.patch → cordis.patch.yml
-├── cordis.patch.yml    # слой патча: запись `lightrag` в дерево профиля
-├── lib/index.js        # клиент LightRAG REST + 7 инструментов + SSR-страница /lightrag-docs + apply(ctx, config)
-├── test/mock-test.mjs  # тесты с мок-сервером
-└── node_modules/       # dev-ссылки на dsh-tools/schemastery (не публикуются)
+├── package.json            # метаданные, dsh.bundle.patch → cordis.patch.yml
+├── cordis.patch.yml        # слой патча: запись `lightrag` в дерево профиля
+├── lib/index.js            # клиент LightRAG REST + 7 инструментов + SSR-страница /lightrag-docs + apply(ctx, config)
+├── failover/               # LLM failover-прокси (primary gpustack → backup vLLM) + start-скрипт
+├── scripts/
+│   ├── secret-scan.mjs     # сканер секретов (дерево + история)
+│   └── hooks/pre-push      # git-хук: блокирует пуш при утечках
+├── test/mock-test.mjs      # тесты с мок-сервером
+└── node_modules/           # dev-ссылки на dsh-tools/schemastery (не публикуются)
 ```

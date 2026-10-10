@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pre-push — блокирует пуш при секретах в рабочем дереве или истории.
+# Включение: git config core.hooksPath scripts/hooks  (см. README, «Безопасность»)
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if node scripts/secret-scan.mjs; then
+  exit 0
+else
+  echo "" >&2
+  echo "PRE-PUSH: пуш заблокирован — в репозитории или его истории найдены секреты/запрещённые файлы." >&2
+  echo "Уберите нарушения (git rm --cached + .gitignore; для истории — git filter-repo) и повторите." >&2
+  exit 1
+fi
